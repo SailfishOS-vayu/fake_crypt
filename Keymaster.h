@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_TWRP_KEYMASTER_H
-#define ANDROID_TWRP_KEYMASTER_H
+#ifndef ANDROID_VOLD_KEYMASTER_H
+#define ANDROID_VOLD_KEYMASTER_H
 
 #include "KeyBuffer.h"
 
@@ -24,13 +24,25 @@
 #include <utility>
 
 #include <android-base/macros.h>
-#include <keymasterV4_0/Keymaster.h>
-#include <keymasterV4_0/authorization_set.h>
+#include <keymasterV4_1/Keymaster.h>
+#include <keymasterV4_1/authorization_set.h>
 
 namespace android {
 namespace vold {
 
-namespace km = ::android::hardware::keymaster::V4_0;
+namespace km {
+
+using namespace ::android::hardware::keymaster::V4_1;
+
+// Surprisingly -- to me, at least -- this is totally fine.  You can re-define symbols that were
+// brought in via a using directive (the "using namespace") above.  In general this seems like a
+// dangerous thing to rely on, but in this case its implications are simple and straightforward:
+// km::ErrorCode refers to the 4.0 ErrorCode, though we pull everything else from 4.1.
+using ErrorCode = ::android::hardware::keymaster::V4_0::ErrorCode;
+using V4_1_ErrorCode = ::android::hardware::keymaster::V4_1::ErrorCode;
+
+}  // namespace km
+
 using KmDevice = km::support::Keymaster;
 
 // C++ wrappers to the Keymaster hidl interface.
@@ -46,8 +58,8 @@ class KeymasterOperation {
     ~KeymasterOperation();
     // Is this instance valid? This is false if creation fails, and becomes
     // false on finish or if an update fails.
-    explicit operator bool() { return mError == km::ErrorCode::OK; }
-    km::ErrorCode errorCode() { return mError; }
+    explicit operator bool() const { return mError == km::ErrorCode::OK; }
+    km::ErrorCode errorCode() const { return mError; }
     // Call "update" repeatedly until all of the input is consumed, and
     // concatenate the output. Return true on success.
     template <class TI, class TO>
@@ -102,9 +114,8 @@ class Keymaster {
     explicit operator bool() { return mDevice.get() != nullptr; }
     // Generate a key in the keymaster from the given params.
     bool generateKey(const km::AuthorizationSet& inParams, std::string* key);
-    // Export a key from keymaster.
-    km::ErrorCode exportKey(km::KeyFormat format, KeyBuffer& kmKey, const std::string& clientId,
-                   const std::string& appData, std::string* key);
+    // Exports a keymaster key with STORAGE_KEY tag wrapped with a per-boot ephemeral key
+    bool exportKey(const KeyBuffer& kmKey, std::string* key);
     // If the keymaster supports it, permanently delete a key.
     bool deleteKey(const std::string& key);
     // Replace stored key blob in response to KM_ERROR_KEY_REQUIRES_UPGRADE.
@@ -117,8 +128,12 @@ class Keymaster {
                              km::AuthorizationSet* outParams);
     bool isSecure();
 
+    // Tell all Keymaster instances that early boot has ended and early boot-only keys can no longer
+    // be created or used.
+    static void earlyBootEnded();
+
   private:
-    std::unique_ptr<KmDevice> mDevice;
+    sp<KmDevice> mDevice;
     DISALLOW_COPY_AND_ASSIGN(Keymaster);
     static bool hmacKeyGenerated;
 };

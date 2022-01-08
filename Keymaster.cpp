@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 
-#include "Keymaster4.h"
+#include "Keymaster.h"
 
+// Will fail linking/give undefined references with hybris/halium
 //#include <android-base/logging.h>
-#include <keymasterV4_0/authorization_set.h>
-#include <keymasterV4_0/keymaster_utils.h>
+#include <keymasterV4_1/authorization_set.h>
+#include <keymasterV4_1/keymaster_utils.h>
 
+// Now that we have no android-base/logging.h, let's get some basic output for logs
 #include <iostream>
 #define LOG(x) std::cout
 #define PLOG(x) std::cout
@@ -142,43 +144,36 @@ bool Keymaster::generateKey(const km::AuthorizationSet& inParams, std::string* k
     return true;
 }
 
-km::ErrorCode Keymaster::exportKey(km::KeyFormat format, KeyBuffer& kmKey, const std::string& clientId,
-                          const std::string& appData, std::string* key) {
+bool Keymaster::exportKey(const KeyBuffer& kmKey, std::string* key) {
     auto kmKeyBlob = km::support::blob2hidlVec(std::string(kmKey.data(), kmKey.size()));
-    auto emptyAssign = NULL;
-    auto kmClientId = (clientId == "!") ? emptyAssign: km::support::blob2hidlVec(clientId);
-    auto kmAppData = (appData == "!") ? emptyAssign: km::support::blob2hidlVec(appData);
     km::ErrorCode km_error;
     auto hidlCb = [&](km::ErrorCode ret, const hidl_vec<uint8_t>& exportedKeyBlob) {
         km_error = ret;
         if (km_error != km::ErrorCode::OK) return;
-        if(key)
-            key->assign(reinterpret_cast<const char*>(&exportedKeyBlob[0]),
-                            exportedKeyBlob.size());
+        if (key)
+            key->assign(reinterpret_cast<const char*>(&exportedKeyBlob[0]), exportedKeyBlob.size());
     };
-    auto error = mDevice->exportKey(format, kmKeyBlob, kmClientId, kmAppData, hidlCb);
+    auto error = mDevice->exportKey(km::KeyFormat::RAW, kmKeyBlob, {}, {}, hidlCb);
     if (!error.isOk()) {
-        LOG(ERROR) << "export_key failed: " << error.description();
-        return km::ErrorCode::UNKNOWN_ERROR;
+        LOG(ERROR) << "export_key failed: " << error.description() << std::endl;
+        return false;
     }
     if (km_error != km::ErrorCode::OK) {
-        LOG(ERROR) << "export_key failed, code " << int32_t(km_error);
-        return km_error;
+        LOG(ERROR) << "export_key failed, code " << int32_t(km_error) << std::endl;
+        return false;
     }
-    return km::ErrorCode::OK;
+    return true;
 }
 
 bool Keymaster::deleteKey(const std::string& key) {
-    LOG(ERROR) << "not actually deleting key\n";
-    return true;
     auto keyBlob = km::support::blob2hidlVec(key);
     auto error = mDevice->deleteKey(keyBlob);
     if (!error.isOk()) {
-        LOG(ERROR) << "delete_key failed: " << error.description();
+        LOG(ERROR) << "delete_key failed: " << error.description() << std::endl;
         return false;
     }
     if (error != km::ErrorCode::OK) {
-        LOG(ERROR) << "delete_key failed, code " << int32_t(km::ErrorCode(error));
+        LOG(ERROR) << "delete_key failed, code " << int32_t(km::ErrorCode(error)) << std::endl;
         return false;
     }
     return true;
@@ -237,6 +232,23 @@ KeymasterOperation Keymaster::begin(km::KeyPurpose purpose, const std::string& k
 
 bool Keymaster::isSecure() {
     return mDevice->halVersion().securityLevel != km::SecurityLevel::SOFTWARE;
+}
+
+void Keymaster::earlyBootEnded() {
+    auto devices = KmDevice::enumerateAvailableDevices();
+    for (auto& dev : devices) {
+        auto error = dev->earlyBootEnded();
+        if (!error.isOk()) {
+            LOG(ERROR) << "earlyBootEnded call failed: " << error.description() << " for "
+                       << dev->halVersion().keymasterName << std::endl;
+        }
+        km::V4_1_ErrorCode km_error = error;
+        if (km_error != km::V4_1_ErrorCode::OK && km_error != km::V4_1_ErrorCode::UNIMPLEMENTED) {
+            LOG(ERROR) << "Error reporting early boot ending to keymaster: "
+                       << static_cast<int32_t>(km_error) << " for "
+                       << dev->halVersion().keymasterName << std::endl;
+        }
+    }
 }
 
 }  // namespace vold

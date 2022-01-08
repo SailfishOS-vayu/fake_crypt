@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "Keymaster4.h"
+#include "Keymaster.h"
 
 /* Maximum allowed keymaster blob size. */
 #define KEYMASTER_BLOB_SIZE 2048
